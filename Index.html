@@ -999,13 +999,24 @@ function receiptData(r) {
   return {lines, total};
 }
 function transferContent(r) {
-  const tpl = (S.bank && S.bank.noi_dung) || 'P{PHONG} T{THANG}';
-  return noAccent(tpl.replace(/\{PHONG\}/g, r.SO_PHONG || '').replace(/\{THANG\}/g, Number(S.month.slice(5)) + '/' + S.month.slice(0, 4)).replace(/\{TEN\}/g, r.TEN_KHACH || '')).trim();
+  let tpl = (S.bank && S.bank.noi_dung) || 'P{PHONG} T{THANG}';
+  tpl = tpl.replace(/\{NHA\}/g, '').trim() + ' ' + (S.house || ''); // tên nhà luôn ở cuối
+  // VietQR không nhận ký tự đặc biệt và tối đa 50 ký tự
+  return noAccent(tpl.replace(/\{PHONG\}/g, r.SO_PHONG || '').replace(/\{THANG\}/g, Number(S.month.slice(5)) + ' ' + S.month.slice(0, 4)).replace(/\{TEN\}/g, r.TEN_KHACH || ''))
+    .replace(/[^A-Za-z0-9]+/g, ' ').trim().slice(0, 50).trim();
+}
+const QR_BANKS = [['VCB','970436','Vietcombank'],['ICB','970415','VietinBank'],['BIDV','970418','BIDV'],['VBA','970405','Agribank'],['MB','970422','MBBank'],['TCB','970407','Techcombank'],['ACB','970416','ACB'],['VPB','970432','VPBank'],['TPB','970423','TPBank'],['STB','970403','Sacombank'],['HDB','970437','HDBank'],['VIB','970441','VIB'],['SHB','970443','SHB'],['MSB','970426','MSB'],['OCB','970448','OCB'],['EIB','970431','Eximbank'],['SEAB','970440','SeABank'],['LPB','970449','LPBank'],['NAB','970428','NamABank'],['BAB','970409','BacABank'],['ABB','970425','ABBANK'],['PVCB','970412','PVcomBank'],['VCCB','970454','VietCapitalBank'],['KLB','970452','KienLongBank'],['SCB','970429','SCB'],['SGICB','970400','SaigonBank'],['PGB','970430','PGBank'],['NCB','970419','NCB'],['VAB','970427','VietABank'],['BVB','970438','BaoVietBank'],['VIETBANK','970433','VietBank'],['SHBVN','970424','ShinhanBank'],['CAKE','546034','CAKE'],['Ubank','546035','Ubank'],['TIMO','963388','Timo']];
+/** Đổi mã / tên ngân hàng đã lưu (VD: VCB, Vietcombank) thành mã BIN chuẩn. */
+function bankBin(v) {
+  const s = String(v || '').trim().toLowerCase().replace(/\s+/g, '');
+  const f = QR_BANKS.find(x => x[0].toLowerCase() === s || x[1] === s || x[2].toLowerCase() === s);
+  return f ? f[1] : '';
 }
 function qrUrl(r, total) {
   const b = S.bank || {};
-  if (!b.qr_on || !b.qr_ma || !b.so_tk) return '';
-  return 'https://img.vietqr.io/image/' + encodeURIComponent(b.qr_ma.trim()) + '-' + encodeURIComponent(String(b.so_tk).replace(/\s/g, '')) +
+  const bin = bankBin(b.qr_ma), acc = String(b.so_tk || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!b.qr_on || !bin || !acc) return '';
+  return 'https://img.vietqr.io/image/' + bin + '-' + encodeURIComponent(acc) +
     '-compact2.png?amount=' + Math.round(total) + '&addInfo=' + encodeURIComponent(transferContent(r)) + '&accountName=' + encodeURIComponent(noAccent(b.chu_tk || ''));
 }
 function receiptHTML(r, cls) {
@@ -1052,9 +1063,10 @@ function bankFormHTML() {
       ${f('chu_tk', 'Chủ tài khoản', 'VD: NGUYEN VAN A')}${f('noi_dung', 'Nội dung chuyển khoản', 'P{PHONG} T{THANG}')}
       ${f('loi_nhan', 'Lời nhắn cuối phiếu', 'VD: Vui lòng thanh toán trước ngày 05. Cảm ơn!', 'full')}
       <label class="full" style="flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:13px"><input type="checkbox" data-bk="qr_on" ${b.qr_on ? 'checked' : ''}> Hiện mã QR chuyển khoản trên phiếu (tạo qua dịch vụ VietQR, khách quét bằng app ngân hàng là điền sẵn số tiền)</label>
-      ${b.qr_on ? f('qr_ma', 'Mã ngân hàng cho QR', 'VD: VCB, TCB, MB, ACB, BIDV, ICB (VietinBank), VPB', 'full') : ''}
+      ${b.qr_on ? `<label class="full">Ngân hàng nhận tiền (để tạo QR)<select data-bk="qr_ma" style="border:1px solid var(--line);border-radius:6px;padding:7px;font-size:14px;color:var(--ink);background:#fff"><option value="">— Chọn ngân hàng —</option>${QR_BANKS.map(x => `<option value="${x[1]}" ${x[1] === bankBin(b.qr_ma) ? 'selected' : ''}>${esc(x[2])}</option>`).join('')}</select></label>
+      ${!bankBin(b.qr_ma) || !b.so_tk ? '<div class="full err">Chưa hiện được QR: cần chọn ngân hàng và nhập số tài khoản.</div>' : ''}` : ''}
     </div>
-    <p class="mut">Trong “Nội dung”: {PHONG} = mã phòng, {THANG} = tháng, {TEN} = tên khách (tự bỏ dấu cho ngân hàng).</p></div>`;
+    <p class="mut">Trong “Nội dung”: {PHONG} = mã phòng, {THANG} = tháng, {TEN} = tên khách. Tên nhà tự thêm vào cuối. App tự bỏ dấu và ký tự đặc biệt, tối đa 50 ký tự, để app ngân hàng đọc được.</p></div>`;
 }
 function renderReceipt() {
   const box = $('#rcBox');
@@ -1089,6 +1101,7 @@ rcb.addEventListener('change', e => {
   const el = e.target;
   if (el.id === 'rcSel') { S.rcIndex = +el.value; refreshReceiptPreview(); }
   else if (el.dataset.bk === 'qr_on') { S.bank.qr_on = el.checked; renderReceipt(); markDirty(); }
+  else if (el.dataset.bk === 'qr_ma' || el.dataset.bk === 'so_tk') renderReceipt();
 });
 rcb.addEventListener('input', e => {
   const el = e.target; if (!el.dataset.bk || el.type === 'checkbox') return;
